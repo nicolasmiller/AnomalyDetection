@@ -61,20 +61,91 @@
 #'
 from pandas import DataFrame
 import numpy as np
+from date_utils import format_timestamp, get_gran
 
-def detect_ts(x, max_anoms=0.10, direction='pos',
+def message(s):
+    print s
+
+def detect_ts(df, max_anoms=0.10, direction='pos',
               alpha=0.05, only_last=None, threshold='None',
               e_value=False, longterm=False, piecewise_median_period_weeks=2, plot=False,
               y_log=False, xlabel = '', ylabel = 'count',
               title=None, verbose=False):
-    if !isinstance(x, DataFrame):
-        raise RuntimeError("data must be a single data frame.")
+    if not isinstance(df, DataFrame):
+        raise ValueError("data must be a single data frame.")
     else:
-        df3.iloc[:,0]
-        if len(x.columns) != 2 or !x.iloc[:,1].applymap(np.isreal).all(1):
-            raise RuntimeError("data must be a 2 column data.frame, with the first column being a set of timestamps, and the second coloumn being numeric values.")
+        if len(df.columns) != 2 or not df.iloc[:,1].applymap(np.isreal).all(1):
+            raise ValueError("data must be a 2 column data.frame, with the first column being a set of timestamps, and the second coloumn being numeric values.")
 
+        if not (df.dtypes[0].type is np.datetime64):
+            df = format_timestamp(df)
 
+    if list(df.columns.values) != ["timestamp", "count"]:
+        df.columns = ["timestamp", "count"]
+
+    # Sanity check all input parameters
+    if max_anoms > 0.49:
+        length = len(df.iloc[:,1])
+        raise ValueError(
+            ("max_anoms must be less than 50% of "
+             "the data points (max_anoms =%f data_points =%s).")
+                         % (round(max_anoms * length, 0), length))
+
+    if not direction in ['pos', 'neg', 'both']:
+        raise ValueError("direction options are: pos | neg | both.")
+
+    if not (0.01 <= alpha or alpha <= 0.1):
+        if verbose:
+            message("Warning: alpha is the statistical signifigance, and is usually between 0.01 and 0.1")
+
+    if not only_last and not only_last in ['day', 'hr']:
+        raise ValueError("only_last must be either 'day' or 'hr'")
+
+    if not threshold in ['None','med_max','p95','p99']:
+        raise ValueError("threshold options are: None | med_max | p95 | p99")
+
+    if not isinstance(e_value, bool):
+        raise ValueError("e_value must be a boolean")
+
+    if not isinstance(longterm, bool):
+        raise ValueError("longterm must be a boolean")
+
+    if piecewise_median_period_weeks < 2:
+        raise ValueError("piecewise_median_period_weeks must be at greater than 2 weeks")
+
+    if not isinstance(plot, bool):
+        raise ValueError("plot must be a boolean")
+
+    if not isinstance(y_log, bool):
+        raise ValueError("y_log must be a boolean")
+
+    if not isinstance(xlabel, basestring):
+        raise ValueError("xlabel must be a string")
+
+    if not isinstance(ylabel, basestring):
+        raise ValueError("ylabel must be a string")
+
+    if title and not isinstance(title, basestring):
+        raise ValueError("title must be a string")
+
+    if not title:
+        title = ''
+    else:
+        title = title + " : "
+
+    gran = get_gran(df)
+
+    if gran == "day":
+        num_days_per_line = 7
+        if isinstance(only_last, basestring) and only_last == 'hr':
+            only_last = 'day'
+    else:
+        num_days_per_line = 1
+
+    if gran == 'sec':
+#        df = format_timestamp(
+
+#                x <- format_timestamp(aggregate(x[2], format(x[1], "%Y-%m-%d %H:%M:00"), eval(parse(text="sum"))))
 
 
     return {'anoms': [],
