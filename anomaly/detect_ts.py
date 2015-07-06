@@ -220,11 +220,12 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         if not s_h_esd_timestamps:
             anoms = all_data[i][all_data[i].iloc[:,0].isin(s_h_esd_timestamps)]
         else:
-            anoms = DataFrame({'timestamp': [0], 'count': [0]})
+            anoms = DataFrame(columns=['timestamp', 'count'])
 
         # Filter the anomalies using one of the thresholding functions if applicable
         if threshold:
             # Calculate daily max values
+            # periodic_maxs <- tapply(x[[2]],as.Date(x[[1]]),FUN=max)
             periodic_maxes = data.groupby('timestamp').aggregate(np.max).count
 
             # Calculate the threshold set by the user
@@ -266,11 +267,11 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         x_subset_single_day = df[df.iloc[:,0] > start_anoms]
         # When plotting anoms for the last day only we only show the previous weeks data
         x_subset_week = df[(df.iloc[:,0] <= start_anoms) & (df.iloc[:,0] > start_date)]
-        all_anoms = df[df.iloc[:,0] >= x_subset_single_day.iloc[:,0][0]]
+        all_anoms = all_anoms[all_anoms[:,0] >= x_subset_single_day.iloc[:,0][0]]
         num_obs = len(x_subset_single_day.iloc[:,1])
 
     # Calculate number of anomalies as a percentage
-    anom_pct = (len(df.iloc[:,1]) / num_obs) * 100
+    anom_pct = (len(df.iloc[:,1]) / float(num_obs)) * 100
 
     if anom_pct == 0:
         # logging ?
@@ -339,7 +340,14 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
 
     # Lastly, return anoms and optionally the plot if requested by the user
     # Ignore plotting for now
-    return {
-        'anoms': anoms,
-        'plot': None
-    }
+    plot = False
+    if plot:
+        return {
+            'anoms': anoms,
+            'plot': xgraph
+        }
+    else:
+        return {
+            'anoms': anoms,
+            'plot': None
+        }
