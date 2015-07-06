@@ -38,50 +38,46 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
     # run length encode result of isnull, check for internal nulls
     if (len(map(lambda x: x[0], list(groupby(ps.isnull(
             ps.concat([ps.Series([np.nan]),
-                       df.iloc[:,1],
+                       data.iloc[:,1],
                        ps.Series([np.nan])])))))) > 3):
         raise ValueError("Data contains non-leading NAs. We suggest replacing NAs with interpolated values (see na.approx in Zoo package).")
     else:
         data = dropna(data)
 
-    df.iloc[:,1].interpolate(inplace=True)
-    decomposition = sm.tsa.seasonal_decompose(df.iloc[:,1])
-
     # -- Step 1: Decompose data. This returns a univarite remainder which will be used for anomaly detection. Optionally, we might NOT decompose.
-#    data_decomp <- stl(ts(data[[2L]], frequency = num_obs_per_period),
-#                       s.window = "periodic", robust = TRUE)
+    data.iloc[:,1].interpolate(inplace=True)
+    decomposition = sm.tsa.seasonal_decompose(data.iloc[:,1])
+
+    # original r stl call, look into switching to pyloess
+    #    data_decomp <- stl(ts(data[[2L]], frequency = num_obs_per_period),
+    #                       s.window = "periodic", robust = TRUE)
 
     # Remove the seasonal component, and the median of the data to create the univariate remainder
     d = {
-        'timestamp': df.iloc[:,0],
-        'count': df.iloc[:,1] - decomposition.seasonal - df.iloc[:,1].median()
+        'timestamp': data.iloc[:,0],
+        'count': dat.iloc[:,1] - decomposition.seasonal - data.iloc[:,1].median()
     }
     data = DataFrame(d)
 
-    d = {
-        'timestamp': df.iloc[:,0]
+    p = {
+        'timestamp': data.iloc[:,0]
         'count': (decomposition.trend + decomposition.seasonal).truncate().convert_objects(convert_numeric=True)
     }
-    data_decomp = DataFrame(d)
+    data_decomp = DataFrame(p)
 
     if posix_timestamp:
         data_decomp = format_timestamp(data_decomp)
 
     # Maximum number of outliers that S-H-ESD can detect (e.g. 49% of data)
-    max_outliers = trunc(num_obs * k)
+    max_outliers = int(num_obs * k)
 
     if max_outliers == 0:
         raise ValueError("With longterm=TRUE, AnomalyDetection splits the data into 2 week periods by default. You have %d observations in a period, which is too few. Set a higher piecewise_median_period_weeks." % num_obs)
 
-
-
-#    func_ma <- match.fun(median)
-#    func_sigma <- match.fun(mad)
-
     ## Define values and vectors.
-    n = len(df.iloc[:,1])
+    n = len(data.iloc[:,1])
     if posix_timestamp:
-        r_idx = datetimes_from_ts(df.iloc[:,1])
+        r_idx = datetimes_from_ts(data.iloc[:,1])
     else:
         r_idx = range(max_outliers)
 
@@ -95,14 +91,14 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
 
         if one_tail:
             if upper_tail:
-                ares = df.iloc[:,1] - df.iloc[:,1].median()
+                ares = data.iloc[:,1] - data.iloc[:,1].median()
             else:
-                ares = df.iloc[:,1].median() - df.iloc[:,1]
+                ares = data.iloc[:,1].median() - data.iloc[:,1]
         else:
-            ares = (df.iloc[:,1] - df.iloc[:,1].median()).abs()
+            ares = (data.iloc[:,1] - data.iloc[:,1].median()).abs()
 
         # protect against constant time series
-        data_sigma = df.iloc[:,1].sum()
+        data_sigma = data.iloc[:,1].sum()
         if data_sigma == 0:
             break
 
@@ -112,7 +108,7 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
 
         temp_max_idx = area[ares == R].index.tolist()[0]
 
-        R_idx[i] = df.iloc[:,0][temp_max_idx]
+        R_idx[i] = data.iloc[:,0][temp_max_idx]
 
         data = data.where(data != R_idx[i])
 

@@ -61,14 +61,15 @@
 #'
 from pandas import DataFrame
 import numpy as np
-from date_utils import format_timestamp, get_gran
+from date_utils import format_timestamp, get_gran, date_format, datetimes_from_ts
 from collections import namedtuple
 from detect_anoms import detect_anoms
 
 Direction = namedtuple('Direction', ['one_tail', 'upper_tail'])
 
 def message(s):
-    print s
+    # actually log something?
+    pass
 
 def detect_ts(df, max_anoms=0.10, direction='pos',
               alpha=0.05, only_last=None, threshold='None',
@@ -147,12 +148,16 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         num_days_per_line = 1
 
     if gran == 'sec':
-        # fix this bullshit
-        df = format_timestamp(aggregate(df.iloc[:,1], format(df.iloc[:,0], "%Y-%m-%d %H:%M:00"), sum))
-
+        df.iloc[:0] = date_format(df.iloc[:,0], "%Y-%m-%d %H:%M:00")
+        df = format_timestamp(df.groupby('timestamp').aggregate(np.sum))
 
     # if the data is daily, then we need to bump the period to weekly to get multiple examples
-    period = switch(gran, min=1440, hr=24, day=7)
+    gran_period = {
+        'min': 1440,
+        'hr': 24,
+        'day': 7
+    }
+    period = gran_period[gran]
     num_obs = len(df.iloc[:,1])
 
     clamp = (1 / float(num_obs))
@@ -207,34 +212,134 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         s_h_esd_timestamps = detect_anoms(all_data[i], k=max_anoms, alpha=alpha, num_obs_per_period=period, use_decomp=True, use_esd=False,
                                        one_tail=anomaly_direction.one_tail, upper_tail=anomaly_direction.upper_tail, verbose=verbose)
 
-    # store decomposed components in local variable and overwrite s_h_esd_timestamps to contain only the anom timestamps
-    data_decomp = s_h_esd_timestamps['stl']
-    s_h_esd_timestamps = s_h_esd_timestamps['anoms']
+        # store decomposed components in local variable and overwrite s_h_esd_timestamps to contain only the anom timestamps
+        data_decomp = s_h_esd_timestamps['stl']
+        s_h_esd_timestamps = s_h_esd_timestamps['anoms']
 
-    # -- Step 3: Use detected anomaly timestamps to extract the actual anomalies (timestamp and value) from the data
-    if not s_h_esd_timestamps:
-      anoms = subset(all_data[[i]], (all_data[[i]][[1]] %in% s_h_esd_timestamps))
+        # -- Step 3: Use detected anomaly timestamps to extract the actual anomalies (timestamp and value) from the data
+        if not s_h_esd_timestamps:
+            anoms = all_data[i][all_data[i].iloc[:,0].isin(s_h_esd_timestamps)]
+        else:
+            anoms = DataFrame({'timestamp': [0], 'count': [0]})
+
+        # Filter the anomalies using one of the thresholding functions if applicable
+        if threshold:
+            # Calculate daily max values
+            periodic_maxes = data.groupby('timestamp').aggregate(np.max).count
+
+            # Calculate the threshold set by the user
+            if threshold == 'med_max':
+                thresh = periodic_maxes.median()
+            elif threshold == 'p95':
+                thresh = periodic_maxes.quantile(.95)
+            elif threshold == 'p99':
+                thresh = periodic_maxes.quantile(.99)
+
+            # Remove any anoms below the threshold
+            anoms = anoms[anoms.iloc[:,1] >= thresh]
+
+        all_anoms.append(anoms)
+        seasonal_plus_trend.append(data_decomp)
+
+    # Cleanup potential duplicates
+    all_anoms.drop_duplicates(subset=['timestamp'])
+    seasonal_plus_trend.drop_duplicates(subset=['timestamp'])
+
+    # -- If only_last was set by the user, create subset of the data that represent the most recent day
+    if only_last:
+        start_data = df.iloc[:,0][-1] - datetime.timedelta(days=7)
+        start_anoms = df.iloc[:,0][-1] - datetime.timedelta(days=1)
+        if gran is "day":
+            breaks = 3 * 12
+            num_days_per_line = 7
+        else:
+            if only_last == 'day':
+                breaks = 12
+            else:
+                start_date = df.iloc[:,0][-1] - datetime.timedelta(days=2)
+                # truncate to days
+                start_date = datetime.date(start_date.year, start_date.month, start_date.day)
+                start_anoms = df.iloc[:,0][-1] - datetime.timedelta(hours=1)
+                breaks = 3
+
+        # subset the last days worth of data
+        x_subset_single_day = df[df.iloc[:,0] > start_anoms]
+        # When plotting anoms for the last day only we only show the previous weeks data
+        x_subset_week = df[(df.iloc[:,0] <= start_anoms) & (df.iloc[:,0] > start_date)]
+        all_anoms = df[df.iloc[:,0] >= x_subset_single_day.iloc[:,0][0]]
+        num_obs = len(x_subset_single_day.iloc[:,1])
+
+    # Calculate number of anomalies as a percentage
+    anom_pct = (len(df.iloc[:,1]) / num_obs) * 100
+
+    if anom_pct == 0:
+        # logging ?
+        # if verbose:
+        #     message("No anomalies detected.")
+        return {
+            "anoms": None,
+            "plot": None
+        }
+
+    # skip plotting for now
+    # if(plot){
+    #   # -- Build title for plots utilizing parameters set by user
+    #   plot_title <-  paste(title, round(anom_pct, digits=2), "% Anomalies (alpha=", alpha, ", direction=", direction,")", sep="")
+    #   if(longterm){
+    #     plot_title <- paste(plot_title, ", longterm=T", sep="")
+    #   }
+
+    #   # -- Plot raw time series data
+    #   color_name <- paste("\"", title, "\"", sep="")
+    #   alpha <- 0.8
+    #   if(!is.null(only_last)){
+    #     xgraph <- ggplot2::ggplot(x_subset_week, ggplot2::aes_string(x="timestamp", y="count")) + ggplot2::theme_bw() + ggplot2::theme(panel.grid.major = ggplot2::element_blank(), panel.grid.minor = ggplot2::element_blank(), text=ggplot2::element_text(size = 14))
+    #     xgraph <- xgraph + ggplot2::geom_line(data=x_subset_week, ggplot2::aes_string(colour=color_name), alpha=alpha*.33) + ggplot2::geom_line(data=x_subset_single_day, ggplot2::aes_string(color=color_name), alpha=alpha)
+    #     week_rng = get_range(x_subset_week, index=2, y_log=y_log)
+    #     day_rng = get_range(x_subset_single_day, index=2, y_log=y_log)
+    #     yrange = c(min(week_rng[1],day_rng[1]), max(week_rng[2],day_rng[2]))
+    #     xgraph <- add_day_labels_datetime(xgraph, breaks=breaks, start=as.POSIXlt(min(x_subset_week[[1]]), tz="UTC"), end=as.POSIXlt(max(x_subset_single_day[[1]]), tz="UTC"), days_per_line=num_days_per_line)
+    #     xgraph <- xgraph + ggplot2::labs(x=xlabel, y=ylabel, title=plot_title)
+    #   }else{
+    #     xgraph <- ggplot2::ggplot(x, ggplot2::aes_string(x="timestamp", y="count")) + ggplot2::theme_bw() + ggplot2::theme(panel.grid.major = ggplot2::element_line(colour = "gray60"), panel.grid.major.y = ggplot2::element_blank(), panel.grid.minor = ggplot2::element_blank(), text=ggplot2::element_text(size = 14))
+    #     xgraph <- xgraph + ggplot2::geom_line(data=x, ggplot2::aes_string(colour=color_name), alpha=alpha)
+    #     yrange <- get_range(x, index=2, y_log=y_log)
+    #     xgraph <- xgraph + ggplot2::scale_x_datetime(labels=function(x) ifelse(as.POSIXlt(x, tz="UTC")$hour != 0,strftime(x, format="%kh", tz="UTC"), strftime(x, format="%b %e", tz="UTC")),
+    #                                                 expand=c(0,0))
+    #     xgraph <- xgraph + ggplot2::labs(x=xlabel, y=ylabel, title=plot_title)
+    #   }
+
+    #   # Add anoms to the plot as circles.
+    #   # We add zzz_ to the start of the name to ensure that the anoms are listed after the data sets.
+    #   xgraph <- xgraph + ggplot2::geom_point(data=all_anoms, ggplot2::aes_string(color=paste("\"zzz_",title,"\"",sep="")), size = 3, shape = 1)
+
+    #   # Hide legend
+    #   xgraph <- xgraph + ggplot2::theme(legend.position="none")
+
+    #   # Use log scaling if set by user
+    #   xgraph <- xgraph + add_formatted_y(yrange, y_log=y_log)
+
+    # }
+
+
+    # Fix to make sure date-time is correct and that we retain hms at midnight
+    all_anoms.iloc[:,0] = date_format(all_anoms.iloc[:,0], "%Y-%m-%d %H:%M:%S")
+
+    # Store expected values if set by user
+    if e_value:
+        anoms = DataFrame(timestamp=all_anoms.iloc[:,0], anoms=all_anoms.iloc[:,1]
+                          expected_value=seasonal_plus_trend.iloc[:,1][datetimes_from_ts(seasonal_plus_trend.iloc[:,1]).isin(all_anoms.iloc[:,0])])
     else:
-      anoms = data.frame(timestamp=numeric(0), count=numeric(0))
+        anoms = DataFrame(timestamp=all_anoms.iloc[:0], anoms=all_anoms.iloc[:,1])
 
-    # Filter the anomalies using one of the thresholding functions if applicable
-    if threshold != "None" :
-      # Calculate daily max values
-      periodic_maxs = tapply(x[[2]],as.Date(x[[1]]),FUN=max)
+    # Make sure we're still a valid POSIXlt datetime.
+    # TODO: Make sure we keep original datetime format and timezone.
+#    anoms['timestamp'] = datetimes_from_ts
+#    anoms$timestamp <- as.POSIXlt(anoms$timestamp, tz="UTC")
 
-      # Calculate the threshold set by the user
-      if threshold == 'med_max':
-        thresh = periodic_maxs.median()
-      elif threshold == 'p95':
-        thresh = quantile(periodic_maxs, .95)
-      elif threshold == 'p99':
-        thresh = quantile(periodic_maxs, .99)
-
-      # Remove any anoms below the threshold
-      anoms = subset(anoms, anoms[[2]] >= thresh)
-
-    all_anoms = rbind(all_anoms, anoms)
-    seasonal_plus_trend = rbind(seasonal_plus_trend, data_decomp)
-
-    return {'anoms': [],
-            'results': []}
+    # Lastly, return anoms and optionally the plot if requested by the user
+    # Ignore plotting for now
+    return {
+        'anoms': anoms,
+        'plot': None
+    }
