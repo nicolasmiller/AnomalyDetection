@@ -2,4 +2,4 @@ main:
   build: .
   command: tail -f /dev/null
   volumes:
-    - /Users/nicolas/repos/AnomalyDetection:/root/AnomalyDetection
+    - /Users/nicolas/repos/ad_real/AnomalyDetection:/root/AnomalyDetection

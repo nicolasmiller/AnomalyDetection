@@ -2,13 +2,14 @@ from datetime import datetime
 from re import match
 from heapq import nlargest
 import pytz
+import numpy as np
 
 def datetimes_from_ts(column):
     return column.map(
         lambda datestring: datetime.fromtimestamp(int(datestring), tz=pytz.utc))
 
 def date_format(column, format):
-    return column.map(lambda datestring: strptime(datestring, format))
+    return column.map(lambda datestring: datetime.strptime(datestring, format))
 
 def format_timestamp(indf, index=0):
     if indf.dtypes[0].type is np.datetime64:
@@ -32,10 +33,12 @@ def format_timestamp(indf, index=0):
     elif match("^\\d{10}$", column[0]):
         column = datetimes_from_ts(column)
 
+    indf.iloc[:,index] = column
+
     return indf
 
 def get_gran(tsdf, index=0):
-    col = indf.iloc[:,index]
+    col = tsdf.iloc[:,index]
     n = len(col)
 
     largest, second_largest = nlargest(2, col)

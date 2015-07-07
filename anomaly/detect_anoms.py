@@ -18,7 +18,8 @@ import numpy as np
 import statsmodels.api as sm
 from date_utils import format_timestamp
 from math import trunc, sqrt
-import scipy.stats.t as student_t
+from scipy.stats import t as student_t
+from itertools import groupby
 
 def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
                  use_decomp=True, use_esd=False, one_tail=True,
@@ -42,11 +43,21 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
                        ps.Series([np.nan])])))))) > 3):
         raise ValueError("Data contains non-leading NAs. We suggest replacing NAs with interpolated values (see na.approx in Zoo package).")
     else:
-        data = dropna(data)
+        data = data.dropna()
 
     # -- Step 1: Decompose data. This returns a univarite remainder which will be used for anomaly detection. Optionally, we might NOT decompose.
-    data.iloc[:,1].interpolate(inplace=True)
-    decomposition = sm.tsa.seasonal_decompose(data.iloc[:,1])
+
+#    print data.columns
+#    print data['timestamp']
+#    print type(data['timestamp'][0])
+    foo = data.set_index('timestamp')
+    foo.interpolate(inplace=True)
+#    print type(foo)
+#    print foo.is_time_series
+    print type(foo)
+#    print data['count'].is_time_series
+    print foo['count']
+    decomposition = sm.tsa.seasonal_decompose(foo['count'])
 
     # original r stl call, look into switching to pyloess
     #    data_decomp <- stl(ts(data[[2L]], frequency = num_obs_per_period),
@@ -60,7 +71,7 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
     data = DataFrame(d)
 
     p = {
-        'timestamp': data.iloc[:,0]
+        'timestamp': data.iloc[:,0],
         'count': (decomposition.trend + decomposition.seasonal).truncate().convert_objects(convert_numeric=True)
     }
     data_decomp = DataFrame(p)

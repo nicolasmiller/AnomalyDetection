@@ -79,7 +79,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
     if not isinstance(df, DataFrame):
         raise ValueError("data must be a single data frame.")
     else:
-        if len(df.columns) != 2 or not df.iloc[:,1].applymap(np.isreal).all(1):
+        if len(df.columns) != 2 or not df.iloc[:,1].map(np.isreal).all():
             raise ValueError("data must be a 2 column data.frame, with the first column being a set of timestamps, and the second coloumn being numeric values.")
 
         if not (df.dtypes[0].type is np.datetime64):
@@ -192,7 +192,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
                                    (last_date - datetime.timedelta(days=num_days_in_period)))
                                   & (df.iloc[:,0] <= last_date)]
     else:
-        all_data = list(df)
+        all_data = [df]
 
     all_anoms = DataFrame(columns=['timestamp', 'count'])
     seasonal_plus_trend = DataFrame(columns=['timestamp', 'count'])
@@ -202,7 +202,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         directions = {
             'pos': Direction(True, True),
             'neg': Direction(True, False),
-            'neg': Direction(False, False)
+            'both': Direction(False, False)
         }
         anomaly_direction = directions[direction]
 
@@ -328,7 +328,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
 
     # Store expected values if set by user
     if e_value:
-        anoms = DataFrame(timestamp=all_anoms.iloc[:,0], anoms=all_anoms.iloc[:,1]
+        anoms = DataFrame(timestamp=all_anoms.iloc[:,0], anoms=all_anoms.iloc[:,1],
                           expected_value=seasonal_plus_trend.iloc[:,1][datetimes_from_ts(seasonal_plus_trend.iloc[:,1]).isin(all_anoms.iloc[:,0])])
     else:
         anoms = DataFrame(timestamp=all_anoms.iloc[:0], anoms=all_anoms.iloc[:,1])

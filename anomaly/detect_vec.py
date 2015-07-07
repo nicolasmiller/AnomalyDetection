@@ -14,7 +14,7 @@ def detect_vec(df, max_anoms=0.10, direction='pos',
     if (isinstance(df, DataFrame) and
         len(df.columns) == 1 and
         df.iloc[:,0].applymap(np.isreal).all(1)):
-        df = DataFrame(timestamp=range(len(df.iloc[:,0])), count=df=iloc[:,0])
+        df = DataFrame(timestamp=range(len(df.iloc[:,0])), count=df.iloc[:,0])
     elif isinstance(df, Series):
         df = DataFrame(timestamp=range(len(df)), count=df)
     else:
@@ -80,7 +80,7 @@ def detect_vec(df, max_anoms=0.10, direction='pos',
     if longterm_period:
         all_data = []
         for j in range(0, len(df.iloc[:,0]), longterm_period):
-            start_index = df.iloc[:,0])[j]
+            start_index = df.iloc[:,0][j]
             end_index = min((start_index + longterm_period - 1), num_obs)
             if (end_index - start_index + 1) == longterm_period:
                 all_data[int(math.ceil(j / float(longterm_period)))] = df[(df.iloc[:,0] >= start_index) & (df.iloc[:,0] <= end_index)]
@@ -98,7 +98,7 @@ def detect_vec(df, max_anoms=0.10, direction='pos',
         directions = {
             'pos': Direction(True, True),
             'neg': Direction(True, False),
-            'neg': Direction(False, False)
+            'both': Direction(False, False)
         }
         anomaly_direction = directions[direction]
 
@@ -214,7 +214,7 @@ def detect_vec(df, max_anoms=0.10, direction='pos',
 
   # Store expected values if set by user
     if e_value:
-        anoms = DataFrame(timestamp=all_anoms.iloc[:,0], anoms=all_anoms.iloc[:,1]
+        anoms = DataFrame(timestamp=all_anoms.iloc[:,0], anoms=all_anoms.iloc[:,1],
                           expected_value=seasonal_plus_trend.iloc[:,1][datetimes_from_ts(seasonal_plus_trend.iloc[:,1]).isin(all_anoms.iloc[:,0])])
     else:
         anoms = DataFrame(timestamp=all_anoms.iloc[:0], anoms=all_anoms.iloc[:,1])
