@@ -7,7 +7,7 @@ RUN apt-get -y install binutils gcc g++ build-essential wget \
                gfortran \
                libopenblas-base libopenblas-dev \
                python-cairo python-numpy python-scipy \
-               git subversion curl
+               git subversion curl r-base
 
 RUN apt-get -y install libxml2-dev
 RUN apt-get -y install libcurl4-openssl-dev
@@ -24,6 +24,7 @@ RUN pip install mock
 RUN pip install pandas
 RUN pip install pytz
 RUN pip install statsmodels
+RUN pip install rpy2
 
 RUN apt-get -y autoremove
 

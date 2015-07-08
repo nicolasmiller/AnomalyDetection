@@ -3,6 +3,7 @@ from unittest import TestCase
 from mock import MagicMock, patch
 import anomaly
 
+
 class TestNAs(TestCase):
     def test_handling_of_leading_trailing_nas(self):
         pass

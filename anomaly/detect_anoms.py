@@ -20,6 +20,7 @@ from date_utils import format_timestamp
 from math import trunc, sqrt
 from scipy.stats import t as student_t
 from itertools import groupby
+from r_stl import stl
 
 def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
                  use_decomp=True, use_esd=False, one_tail=True,
@@ -47,37 +48,46 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
 
     # -- Step 1: Decompose data. This returns a univarite remainder which will be used for anomaly detection. Optionally, we might NOT decompose.
 
-#    print data.columns
-#    print data['timestamp']
-#    print type(data['timestamp'][0])
-    foo = data.set_index('timestamp')
-    foo.interpolate(inplace=True)
-#    print type(foo)
-#    print foo.is_time_series
-    print type(foo)
-#    print data['count'].is_time_series
-    print foo['count']
-    decomposition = sm.tsa.seasonal_decompose(foo['count'])
-
     # original r stl call, look into switching to pyloess
     #    data_decomp <- stl(ts(data[[2L]], frequency = num_obs_per_period),
     #                       s.window = "periodic", robust = TRUE)
 
-    # Remove the seasonal component, and the median of the data to create the univariate remainder
-    d = {
-        'timestamp': data.iloc[:,0],
-        'count': dat.iloc[:,1] - decomposition.seasonal - data.iloc[:,1].median()
+    data = data.set_index('timestamp')
+
+    # TODO clean this up
+    resample_period = {
+        1440: 'T',
+        24: 'H',
+        7: 'D'
     }
-    data = DataFrame(d)
+    data = data.resample(resample_period[num_obs_per_period])
+
+    decomp = stl(data['count'], "periodic", np=num_obs_per_period)
+
+#    data_decomp = stl(data, ns, np=None, nt=None, nl=None, isdeg=0, itdeg=1, ildeg=1,
+#        nsjump=None, ntjump=None, nljump=None, ni=2, no=0, fulloutput=False)
+
+    # statsmodels decomp
+    # data = data.set_index('timestamp')
+    # data['count'].interpolate(inplace=True)
+    # decomposition = sm.tsa.seasonal_decompose(data['count'])
+
+    # Remove the seasonal component, and the median of the data to create the univariate remainder
+
+    d = {
+        'timestamp': data.index,
+        'count': data['count'] - decomp['seasonal'] - data['count'].median()
+    }
+    data = ps.DataFrame(d)
 
     p = {
-        'timestamp': data.iloc[:,0],
-        'count': (decomposition.trend + decomposition.seasonal).truncate().convert_objects(convert_numeric=True)
+        'timestamp': decomp.index,
+        'count': (decomp['trend'] + decomp['seasonal']).truncate().convert_objects(convert_numeric=True)
     }
-    data_decomp = DataFrame(p)
+    data_decomp = ps.DataFrame(p)
 
-    if posix_timestamp:
-        data_decomp = format_timestamp(data_decomp)
+    #if posix_timestamp:
+    #    data_decomp = format_timestamp(data_decomp)
 
     # Maximum number of outliers that S-H-ESD can detect (e.g. 49% of data)
     max_outliers = int(num_obs * k)
@@ -86,30 +96,31 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
         raise ValueError("With longterm=TRUE, AnomalyDetection splits the data into 2 week periods by default. You have %d observations in a period, which is too few. Set a higher piecewise_median_period_weeks." % num_obs)
 
     ## Define values and vectors.
-    n = len(data.iloc[:,1])
-    if posix_timestamp:
-        r_idx = datetimes_from_ts(data.iloc[:,1])
-    else:
-        r_idx = range(max_outliers)
+    n = len(data.iloc[:,0])
+    R_idx = range(max_outliers)
+
+    # if posix_timestamp:
+    #     R_idx = datetimes_from_ts(data.iloc[:,1)
+    # else:
 
     num_anoms = 0
 
     # Compute test statistic until r=max_outliers values have been
     # removed from the sample.
-    for i in range(max_outliers):
+    for i in range(1, max_outliers + 1):
         # logging?
         #        if(verbose) message(paste(i,"/", max_outliers,"completed"))
 
         if one_tail:
             if upper_tail:
-                ares = data.iloc[:,1] - data.iloc[:,1].median()
+                ares = data.iloc[:,0] - data.iloc[:,0].median()
             else:
-                ares = data.iloc[:,1].median() - data.iloc[:,1]
+                ares = data.iloc[:,0].median() - data.iloc[:,0]
         else:
-            ares = (data.iloc[:,1] - data.iloc[:,1].median()).abs()
+            ares = (data.iloc[:,0] - data.iloc[:,0].median()).abs()
 
         # protect against constant time series
-        data_sigma = data.iloc[:,1].sum()
+        data_sigma = data.iloc[:,0].mad()
         if data_sigma == 0:
             break
 
@@ -117,19 +128,21 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
 
         R = ares.max()
 
-        temp_max_idx = area[ares == R].index.tolist()[0]
+        temp_max_idx = ares[ares == R].index.tolist()[0]
 
-        R_idx[i] = data.iloc[:,0][temp_max_idx]
 
-        data = data.where(data != R_idx[i])
+        #        R_idx[i - 1] = data.get_value(temp_max_idx, 0)
+        R_idx[i - 1] = temp_max_idx
+
+        data = data[data.index != R_idx[i - 1]]
 
         if one_tail:
-            p = 1 - alpha / (n - i + 1)
+            p = 1 - alpha / float(n - i + 1)
         else:
-            p = 1 - alpha / (2 * (n - i + 1))
+            p = 1 - alpha / float(2 * (n - i + 1))
 
-        t = student_t.ppf(p, (n-i-1L))
-        lam = t * (n - 1) / sqrt((n - i - 1 + t**2) * (n - i + 1))
+        t = student_t.ppf(p, (n - i - 1))
+        lam = t * (n - i) / float(sqrt((n - i - 1 + t**2) * (n - i + 1)))
 
         if R > lam:
             num_anoms = i

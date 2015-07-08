@@ -64,6 +64,7 @@ import numpy as np
 from date_utils import format_timestamp, get_gran, date_format, datetimes_from_ts
 from collections import namedtuple
 from detect_anoms import detect_anoms
+import datetime
 
 Direction = namedtuple('Direction', ['one_tail', 'upper_tail'])
 
@@ -72,7 +73,7 @@ def message(s):
     pass
 
 def detect_ts(df, max_anoms=0.10, direction='pos',
-              alpha=0.05, only_last=None, threshold='None',
+              alpha=0.05, only_last=None, threshold=None,
               e_value=False, longterm=False, piecewise_median_period_weeks=2, plot=False,
               y_log=False, xlabel = '', ylabel = 'count',
               title=None, verbose=False):
@@ -106,7 +107,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
     if not only_last and not only_last in ['day', 'hr']:
         raise ValueError("only_last must be either 'day' or 'hr'")
 
-    if not threshold in ['None','med_max','p95','p99']:
+    if not threshold in [None,'med_max','p95','p99']:
         raise ValueError("threshold options are: None | med_max | p95 | p99")
 
     if not isinstance(e_value, bool):
@@ -217,7 +218,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         s_h_esd_timestamps = s_h_esd_timestamps['anoms']
 
         # -- Step 3: Use detected anomaly timestamps to extract the actual anomalies (timestamp and value) from the data
-        if not s_h_esd_timestamps:
+        if s_h_esd_timestamps:
             anoms = all_data[i][all_data[i].iloc[:,0].isin(s_h_esd_timestamps)]
         else:
             anoms = DataFrame(columns=['timestamp', 'count'])
@@ -226,7 +227,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         if threshold:
             # Calculate daily max values
             # periodic_maxs <- tapply(x[[2]],as.Date(x[[1]]),FUN=max)
-            periodic_maxes = data.groupby('timestamp').aggregate(np.max).count
+            periodic_maxes = df.groupby('timestamp').aggregate(np.max).count
 
             # Calculate the threshold set by the user
             if threshold == 'med_max':
@@ -239,8 +240,8 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
             # Remove any anoms below the threshold
             anoms = anoms[anoms.iloc[:,1] >= thresh]
 
-        all_anoms.append(anoms)
-        seasonal_plus_trend.append(data_decomp)
+        all_anoms = all_anoms.append(anoms)
+        seasonal_plus_trend = seasonal_plus_trend.append(data_decomp)
 
     # Cleanup potential duplicates
     all_anoms.drop_duplicates(subset=['timestamp'])
@@ -248,8 +249,8 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
 
     # -- If only_last was set by the user, create subset of the data that represent the most recent day
     if only_last:
-        start_data = df.iloc[:,0][-1] - datetime.timedelta(days=7)
-        start_anoms = df.iloc[:,0][-1] - datetime.timedelta(days=1)
+        start_date = df.timestamp.iget(-1) - datetime.timedelta(days=7)
+        start_anoms = df.timestamp.iget(-1) - datetime.timedelta(days=1)
         if gran is "day":
             breaks = 3 * 12
             num_days_per_line = 7
@@ -257,18 +258,19 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
             if only_last == 'day':
                 breaks = 12
             else:
-                start_date = df.iloc[:,0][-1] - datetime.timedelta(days=2)
+                start_date = df.timestamp.iget(-1) - datetime.timedelta(days=2)
                 # truncate to days
                 start_date = datetime.date(start_date.year, start_date.month, start_date.day)
-                start_anoms = df.iloc[:,0][-1] - datetime.timedelta(hours=1)
+                start_anoms = df.timestamp.iget(-1) - datetime.timedelta(hours=1)
                 breaks = 3
 
         # subset the last days worth of data
-        x_subset_single_day = df[df.iloc[:,0] > start_anoms]
+        x_subset_single_day = df[df.timestamp > start_anoms]
         # When plotting anoms for the last day only we only show the previous weeks data
-        x_subset_week = df[(df.iloc[:,0] <= start_anoms) & (df.iloc[:,0] > start_date)]
-        all_anoms = all_anoms[all_anoms[:,0] >= x_subset_single_day.iloc[:,0][0]]
-        num_obs = len(x_subset_single_day.iloc[:,1])
+        x_subset_week = df[(df.timestamp <= start_anoms) & (df.timestamp > start_date)]
+        if len(all_anoms) > 0:
+            all_anoms = all_anoms[all_anoms.timestamp >= x_subset_single_day.timestamp.iget(0)]
+        num_obs = len(x_subset_single_day['count'])
 
     # Calculate number of anomalies as a percentage
     anom_pct = (len(df.iloc[:,1]) / float(num_obs)) * 100
@@ -324,19 +326,27 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
 
 
     # Fix to make sure date-time is correct and that we retain hms at midnight
-    all_anoms.iloc[:,0] = date_format(all_anoms.iloc[:,0], "%Y-%m-%d %H:%M:%S")
+    #    all_anoms.iloc[:,0] = date_format(all_anoms.iloc[:,0], "%Y-%m-%d %H:%M:%S")
 
     # Store expected values if set by user
     if e_value:
-        anoms = DataFrame(timestamp=all_anoms.iloc[:,0], anoms=all_anoms.iloc[:,1],
-                          expected_value=seasonal_plus_trend.iloc[:,1][datetimes_from_ts(seasonal_plus_trend.iloc[:,1]).isin(all_anoms.iloc[:,0])])
+        d = {
+            'timestamp': all_anoms.iloc[:,0],
+            'anoms': all_anoms.iloc[:,1],
+            'expected_value': seasonal_plus_trend.iloc[:,1][datetimes_from_ts(seasonal_plus_trend.iloc[:,1]).isin(all_anoms.iloc[:,0])]
+        }
+        anoms = DataFrame(d)
     else:
-        anoms = DataFrame(timestamp=all_anoms.iloc[:0], anoms=all_anoms.iloc[:,1])
+        d = {
+            'timestamp': all_anoms.timestamp,
+            'anoms': all_anoms.iloc[:,1]
+        }
+        anoms = DataFrame(d)
 
     # Make sure we're still a valid POSIXlt datetime.
     # TODO: Make sure we keep original datetime format and timezone.
-#    anoms['timestamp'] = datetimes_from_ts
-#    anoms$timestamp <- as.POSIXlt(anoms$timestamp, tz="UTC")
+    #    anoms['timestamp'] = datetimes_from_ts
+    #    anoms$timestamp <- as.POSIXlt(anoms$timestamp, tz="UTC")
 
     # Lastly, return anoms and optionally the plot if requested by the user
     # Ignore plotting for now
