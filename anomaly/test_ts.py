@@ -11,20 +11,20 @@ class TestTS(TestCase):
         self.raw_data = pd.read_csv(os.path.join(self.path, 'raw_data.csv'), usecols=['timestamp', 'count'])
 
     def test_both_directions_with_plot(self):
-#        print self.raw_data
-#        assert False
         results = anomaly.detect_ts(self.raw_data, max_anoms=0.02,
-                                     direction='both', only_last='day', plot=False)
+                                    direction='both', only_last='day', plot=False)
+        eq_(len(results['anoms'].columns), 2)
         eq_(len(results['anoms'].iloc[:,1]), 25)
 
-    # def test_both_directions_e_value_longterm(self):
-    #     results = anomaly.detect_ts(self.raw_data, max_anoms=0.02,
-    #                                 direction='both', longterm=True, plot=False)
-    #     eq_(len(results['anoms'].iloc[:,1]), 131)
+    def test_both_directions_e_value_longterm(self):
+        results = anomaly.detect_ts(self.raw_data, max_anoms=0.02,
+                                     direction='both', longterm=True, plot=False, e_value=True)
+        eq_(len(results['anoms'].columns), 3)
+        eq_(len(results['anoms'].iloc[:,1]), 131)
 
 
-    # def test_both_directions_e_value_threshold_med_max(self):
-    #     results = anomaly.detect_ts(self.raw_data, max_anoms=0.02,
-    #                                 direction='both', longterm=True, plot=False)
-    #     eq_(len(results['anoms']), 3)
-    #     eq_(len(results['anoms'].iloc[:,1]), 4)
+    def test_both_directions_e_value_threshold_med_max(self):
+        results = anomaly.detect_ts(self.raw_data, max_anoms=0.02,
+                                    direction='both', threshold="med_max", e_value=True)
+        eq_(len(results['anoms'].columns), 3)
+        eq_(len(results['anoms'].iloc[:,1]), 4)

@@ -59,12 +59,15 @@
 #' @seealso \code{\link{AnomalyDetectionVec}}
 #' @export
 #'
-from pandas import DataFrame
+from pandas import DataFrame, to_datetime
+from pandas.lib import Timestamp
 import numpy as np
 from date_utils import format_timestamp, get_gran, date_format, datetimes_from_ts
 from collections import namedtuple
 from detect_anoms import detect_anoms
 import datetime
+from math import ceil
+import sys
 
 Direction = namedtuple('Direction', ['one_tail', 'upper_tail'])
 
@@ -104,7 +107,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         if verbose:
             message("Warning: alpha is the statistical signifigance, and is usually between 0.01 and 0.1")
 
-    if not only_last and not only_last in ['day', 'hr']:
+    if only_last and not only_last in ['day', 'hr']:
         raise ValueError("only_last must be either 'day' or 'hr'")
 
     if not threshold in [None,'med_max','p95','p99']:
@@ -149,7 +152,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         num_days_per_line = 1
 
     if gran == 'sec':
-        df.iloc[:0] = date_format(df.iloc[:,0], "%Y-%m-%d %H:%M:00")
+        df.timestamp = date_format(df.timestamp, "%Y-%m-%d %H:%M:00")
         df = format_timestamp(df.groupby('timestamp').aggregate(np.sum))
 
     # if the data is daily, then we need to bump the period to weekly to get multiple examples
@@ -159,7 +162,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         'day': 7
     }
     period = gran_period[gran]
-    num_obs = len(df.iloc[:,1])
+    num_obs = len(df['count'])
 
     clamp = (1 / float(num_obs))
     if max_anoms < clamp:
@@ -173,25 +176,23 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
             num_obs_in_period = period * 7 * piecewise_median_period_weeks
             num_days_in_period = 7 * piecewise_median_period_weeks
 
-        last_date = df.iloc[:,0][num_obs - 1]
+        last_date = df.timestamp.iget(-1)
 
-        all_data = []
+        all_data = range(int(ceil(len(df['count']) / float(num_obs_in_period))))
 
-        for j in range(0, len(df.iloc[:,0]), num_obs_in_period):
-            start_date = df.iloc[:,0][j]
+        for j in range(0, len(df.timestamp), num_obs_in_period):
+            start_date = df.timestamp.iget(j)
             end_date = min(start_date + datetime.timedelta(days=num_obs_in_period),
-                           df.iloc[:,0][-1])
+                           df.timestamp.iget(-1))
 
             # if there is at least 14 days left, subset it, otherwise subset last_date - 14days
             if (end_date - start_date).days == num_days_in_period:
-                all_data[int(math.ceil(j / num_obs_in_period))] = df[(df.iloc[:,0] >= start_date) & (df.iloc[:,0] < end_date)]
+                all_data[int(ceil(j / num_obs_in_period))] = df[(df.timestamp >= start_date) & (df.timestamp < end_date)]
             else:
-                all_data[int(
-                    math.ceil(j /
-                              num_obs_in_period))] = df[
-                                  (df.iloc[:,0] >
-                                   (last_date - datetime.timedelta(days=num_days_in_period)))
-                                  & (df.iloc[:,0] <= last_date)]
+                all_data[int(ceil(j / num_obs_in_period))] = df[
+                    (df.timestamp >
+                     (last_date - datetime.timedelta(days=num_days_in_period)))
+                    & (df.timestamp <= last_date)]
     else:
         all_data = [df]
 
@@ -203,7 +204,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         directions = {
             'pos': Direction(True, True),
             'neg': Direction(True, False),
-            'both': Direction(False, False)
+            'both': Direction(False, True)
         }
         anomaly_direction = directions[direction]
 
@@ -226,8 +227,7 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
         # Filter the anomalies using one of the thresholding functions if applicable
         if threshold:
             # Calculate daily max values
-            # periodic_maxs <- tapply(x[[2]],as.Date(x[[1]]),FUN=max)
-            periodic_maxes = df.groupby('timestamp').aggregate(np.max).count
+            periodic_maxes = df.groupby(df.timestamp.map(Timestamp.date)).aggregate(np.max)['count']
 
             # Calculate the threshold set by the user
             if threshold == 'med_max':
@@ -331,17 +331,16 @@ def detect_ts(df, max_anoms=0.10, direction='pos',
     # Store expected values if set by user
     if e_value:
         d = {
-            'timestamp': all_anoms.iloc[:,0],
+            'timestamp': all_anoms.timestamp,
             'anoms': all_anoms.iloc[:,1],
-            'expected_value': seasonal_plus_trend.iloc[:,1][datetimes_from_ts(seasonal_plus_trend.iloc[:,1]).isin(all_anoms.iloc[:,0])]
+            'expected_value': seasonal_plus_trend.iloc[:,1][seasonal_plus_trend.timestamp.isin(all_anoms.timestamp)]
         }
-        anoms = DataFrame(d)
     else:
         d = {
             'timestamp': all_anoms.timestamp,
             'anoms': all_anoms.iloc[:,1]
         }
-        anoms = DataFrame(d)
+    anoms = DataFrame(d, index=all_anoms.timestamp)
 
     # Make sure we're still a valid POSIXlt datetime.
     # TODO: Make sure we keep original datetime format and timezone.

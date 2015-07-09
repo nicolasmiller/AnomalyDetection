@@ -21,6 +21,8 @@ from math import trunc, sqrt
 from scipy.stats import t as student_t
 from itertools import groupby
 from r_stl import stl
+import sys
+from statsmodels.robust.scale import mad
 
 def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
                  use_decomp=True, use_esd=False, one_tail=True,
@@ -61,6 +63,7 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
         7: 'D'
     }
     data = data.resample(resample_period[num_obs_per_period])
+
 
     decomp = stl(data['count'], "periodic", np=num_obs_per_period)
 
@@ -113,25 +116,35 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
 
         if one_tail:
             if upper_tail:
-                ares = data.iloc[:,0] - data.iloc[:,0].median()
+                ares = data['count'] - data['count'].median()
             else:
-                ares = data.iloc[:,0].median() - data.iloc[:,0]
+                ares = data['count'].median() - data['count']
         else:
-            ares = (data.iloc[:,0] - data.iloc[:,0].median()).abs()
+#            print 'median', data['count'].median()
+            ares = (data['count'] - data['count'].median()).abs()
+
+#        print list(ares)
+        # with open('data_count', 'w+') as f:
+        #     import json
+        #     json.dump(list(data['count']), f)
+
 
         # protect against constant time series
-        data_sigma = data.iloc[:,0].mad()
+        data_sigma = mad(data['count'])
         if data_sigma == 0:
             break
 
+#        print 'data_sigma', data_sigma
+#        print ares
         ares = ares / float(data_sigma)
 
         R = ares.max()
+#        print 'R', R
+#        sys.exit()
+
 
         temp_max_idx = ares[ares == R].index.tolist()[0]
 
-
-        #        R_idx[i - 1] = data.get_value(temp_max_idx, 0)
         R_idx[i - 1] = temp_max_idx
 
         data = data[data.index != R_idx[i - 1]]
@@ -144,8 +157,14 @@ def detect_anoms(data, k=0.49, alpha=0.05, num_obs_per_period=None,
         t = student_t.ppf(p, (n - i - 1))
         lam = t * (n - i) / float(sqrt((n - i - 1 + t**2) * (n - i + 1)))
 
+#        print(map(str,(i, p, t, R, lam)))
+
         if R > lam:
             num_anoms = i
+
+#    print 'num_anoms'
+#    print num_anoms
+#    sys.exit()
 
     if num_anoms > 0:
         R_idx = R_idx[:num_anoms]
